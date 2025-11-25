@@ -1,13 +1,44 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
-name = "document-parse"
+name = "mcp-document-parse"
 version = "0.1.0"
-description = "Add your description here"
+description = "MCP provider for document parsing and conversion to Markdown"
+authors = [{ name = "Niutrans", email = "tianfengning@niutrans.com" }]
+license = { text = "MIT" }
 readme = "README.md"
-requires-python = ">=3.13"
-dependencies = [
-    "fastapi>=0.121.1",
-    "gradio>=5.49.1",
-    "mcp[cli]>=1.21.0",
-    "requests>=2.32.5",
-    "tqdm>=4.67.1",
+keywords = ["mcp", "document", "parsing", "markdown", "pdf", "word", "excel", "ppt"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.9",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent"
 ]
+requires-python = ">=3.10"
+dependencies = [
+  "mcp[cli]>=1.21.0",
+  "requests>=2.31.0",
+  "tqdm>=4.60.0"
+]
+
+[project.optional-dependencies]
+dev = ["uv"]
+
+[project.scripts]
+mcp-document-parse = "file_upload_handler:main"
+
+[project.urls]
+Homepage = "https://niutrans.com"
+Source = "https://github.com/niutrans/mcp-document-parse"
+
+[tool.setuptools]
+py-modules = ["file_upload_handler"]
+
+[tool.mcp]
+# MCP工具配置，帮助MCP客户端发现和加载工具
+providers = ["file_upload_handler:mcp"]
