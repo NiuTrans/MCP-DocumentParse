@@ -46,7 +46,7 @@ class UploadFileWrapper:
 class DocumentTransClient:
     """文档转换API客户端（使用小牛翻译API）"""
 
-    def __init__(self, base_url="http://niutrans.com", app_id="", apikey=""):
+    def __init__(self, base_url="https://api.niutrans.com", app_id="", apikey=""):
         self.base_url = base_url.rstrip('/')
         self.session = requests.Session()
         self.app_id = app_id
