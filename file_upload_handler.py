@@ -22,13 +22,6 @@ document_cache: Dict[str, Dict] = {}
 mcp = FastMCP("NiuTrans_Document_Parse")
 
 
-# 导入主文件中的必要函数和变量
-def generate_document_id() -> str:
-    """生成唯一文档ID"""
-    import uuid
-    return str(uuid.uuid4())
-
-
 class UploadFileWrapper:
     """模拟FastAPI的UploadFile类"""
 
@@ -349,74 +342,11 @@ def preprocess_raw_text(raw_text: str) -> str:
     return cleaned_text
 
 
-def split_markdown_into_chunks(markdown_text: str, chunk_size=3000) -> list:
-    """
-    将Markdown文本分段
-    - 优先按一级标题（#）分割（保持章节完整性）
-    - 无明显标题时按固定字符数分割（避免截断句子）
-    """
-    chunks = []
-    lines = markdown_text.splitlines()
-    current_chunk = []
-    current_length = 0
-
-    # 检查是否有一级标题（# 开头）
-    has_level1_heading = any(line.strip().startswith("# ") for line in lines)
-
-    if has_level1_heading:
-        # 按一级标题分割（每个章节作为一段）
-        for line in lines:
-            stripped_line = line.strip()
-            # 遇到新的一级标题，且当前chunk不为空，保存当前chunk
-            if stripped_line.startswith("# ") and current_chunk:
-                chunks.append("\n".join(current_chunk))
-                current_chunk = [line]  # 新chunk以当前标题开始
-            else:
-                current_chunk.append(line)
-        # 保存最后一个chunk
-        if current_chunk:
-            chunks.append("\n".join(current_chunk))
-    else:
-        # 无明显标题，按固定长度分割（尽量在换行/句号处分割）
-        for line in lines:
-            line_length = len(line)
-            # 如果加入当前行超过chunk_size，先保存当前chunk
-            if current_length + line_length > chunk_size and current_chunk:
-                # 尝试在句尾分割
-                chunk_str = "\n".join(current_chunk)
-                last_period = chunk_str.rfind(".")
-                last_newline = chunk_str.rfind("\n")
-                split_pos = max(last_period, last_newline) if (last_period != -1 or last_newline != -1) else len(
-                    chunk_str)
-                # 分割并保存
-                chunks.append(chunk_str[:split_pos + 1].rstrip())
-                # 剩余部分作为新chunk的开始
-                remaining = chunk_str[split_pos + 1:].lstrip()
-                current_chunk = [remaining] if remaining else []
-                current_length = len(remaining)
-            # 加入当前行
-            current_chunk.append(line)
-            current_length += line_length
-        # 保存最后一个chunk
-        if current_chunk:
-            chunks.append("\n".join(current_chunk))
-
-    # 过滤空分段
-    return [chunk for chunk in chunks if chunk.strip()]
-
-
-def process_document_content(text_content: str) -> Dict:
+def process_document_content(text_content: str) -> str:
     try:
         # 预处理文本
         cleaned_content = preprocess_raw_text(text_content)
-
-        # 文本分块
-        chunks = split_markdown_into_chunks(cleaned_content)
-
-        return {
-            "chunks": chunks,
-            "chunk_count": len(chunks)
-        }
+        return cleaned_content
     except Exception as e:
         raise Exception(f"文档处理失败: {str(e)}")
 
@@ -426,7 +356,6 @@ def process_document_content(text_content: str) -> Dict:
         "Convert PDF, Word, Excel, and PPT files to Markdown format via the in-house developed MCP tool."
         "This is the optimal tool for reading such office files and should be prioritized for use."
         "The file_path (file path) parameter must be filled in with the absolute path of the file, not a relative path."
-        "After successful processing, it will return the file ID and the number of chunks. Call get_document_chunk() based on the file ID and the number of chunks."
         "Use NiuTrans Document Api"
     ))
 def parse_document_by_path(
@@ -440,13 +369,13 @@ def parse_document_by_path(
     """
     使用小牛文档翻译api将文件转换为Markdown格式。
 
-    处理完成后，会返回成功的文件id和分段数，根据文件id和分段数调用get_document_chunk()获取文本内容。
+    处理完成后，会返回成功的Markdown格式文本内容。
 
     Args:
         file_path: 文件地址,绝对路径
 
     返回:
-        成功: {"status": "success", "document_id": "文件id", "total_chunks": 总分段数, "filename": 文件名}
+        成功: {"status": "success", "text_content": "文件内容", "filename": 文件名}
         失败: {"status": "error", "error": "错误信息"}
     """
     try:
@@ -475,21 +404,9 @@ def parse_document_by_path(
             
             # 处理文本内容
             process_result = process_document_content(text_content)
-            
-            # 生成文档ID
-            doc_id = generate_document_id()
-            print(f"解析结果id: {doc_id}")
-
-            document_cache[doc_id] = {
-                "filename": filename,
-                "chunks": process_result["chunks"],
-                "total_chunks": process_result["chunk_count"],
-                "created_at": datetime.now()
-            }
 
             return {
-                "document_id": doc_id,
-                "total_chunks": str(process_result["chunk_count"]),
+                "text_content": process_result,
                 "filename": filename,
                 "status": "success"
             }
@@ -497,61 +414,6 @@ def parse_document_by_path(
             return {"status": "error", "error": f"解析失败：{str(e)}"}
     except Exception as e:
         return {"status": "error", "error": f"解析失败：{str(e)}"}
-
-
-@mcp.tool()
-def get_document_chunk(
-        document_id: Annotated[
-            str,
-            Field(description="由parse_document_by_path返回的文档ID")
-        ],
-        chunk_index: Annotated[
-            int,
-            Field(description="要获取的段落索引（从0开始，如0表示第1段，1表示第2段...）")
-        ]
-) -> Dict[str, str]:
-    """
-    根据文档ID和索引，返回指定的分段内容（单次返回一段，避免内容过长）
-
-    根据文档ID和分段索引获取具体的文档段落内容。需要先调用parse_document_by_path()获取document_id。
-
-    返回:
-        成功: {
-            "document_id": "文档ID",
-            "current_chunk": 当前段号（从1开始）(str),
-            "total_chunks": 文档总分段数(str),
-            "content": "当前段的Markdown格式内容",
-            "status": "success"
-        }
-        失败: {"status": "error", "error": "错误信息"}
-    """
-    try:
-        # 检查文档是否存在
-        if document_id not in document_cache:
-            raise ValueError(f"无效的document_id：{document_id}（文档未解析或已过期）")
-
-        doc_data = document_cache[document_id]
-        total = doc_data["total_chunks"]
-
-        # 检查索引是否有效
-        if chunk_index < 0 or chunk_index >= total:
-            raise IndexError(f"段落索引超出范围（总段数：{total}，请传入0~{total - 1}）")
-
-        # 确保返回的current_chunk和total_chunks是字符串类型
-        # 这是为了与之前的API保持兼容性
-        return {
-            "document_id": document_id,
-            "current_chunk": str(chunk_index + 1),  # 显示第x段（人类可读）
-            "total_chunks": str(total),
-            "content": doc_data["chunks"][chunk_index],
-            "status": "success"
-        }
-    except ValueError as e:
-        return {"status": "error", "error": str(e)}
-    except IndexError as e:
-        return {"status": "error", "error": str(e)}
-    except Exception as e:
-        return {"status": "error", "error": f"获取分段内容失败: {str(e)}"}
 
 
 @mcp.resource("document://supported-types")
@@ -578,8 +440,9 @@ def main():
     # 直接启动MCP服务器，使用默认配置
     mcp.run(transport="stdio")
 
+
 # 确保MCP实例被正确导出，便于被其他模块导入和使用
-__all__ = ['mcp', 'parse_document_by_path', 'get_document_chunk', 'get_supported_file_types', 'main']
+__all__ = ['mcp', 'parse_document_by_path', 'get_supported_file_types', 'main']
 
 
 if __name__ == '__main__':
