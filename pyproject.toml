@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mcp-document-parse"
-version = "0.1.0"
+version = "0.1.1"
 description = "MCP provider for document parsing and conversion to Markdown"
 authors = [{ name = "Niutrans", email = "tianfengning@niutrans.com" }]
 license = { text = "MIT" }
