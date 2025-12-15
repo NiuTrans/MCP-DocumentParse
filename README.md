@@ -19,6 +19,11 @@
 uv tool install mcp-document-parse
 ```
 
+## 环境变量
+
+- `NIUTRANS_API_KEY`（必填）：小牛翻译开放平台提供文档API的的 API Key,可免费使用, 请登录后获取:https://niutrans.com/cloud/api/list。
+- `NIUTRANS_DOCUMENT_APPID`（必填）：小牛翻译开放平台提供文档API的的 APPID,可免费使用, 请登录后获取:https://niutrans.com/cloud/api/list。
+
 ## 环境要求
 
 - Python >= 3.9
@@ -38,7 +43,11 @@ uv tool install mcp-document-parse
         "tool",
         "run",
         "mcp-document-parse"
-      ]
+      ],
+      "env": {
+        "NIUTRANS_API_KEY": "${env.NIUTRANS_API_KEY}",
+        "NIUTRANS_DOCUMENT_APPID": "${env.NIUTRANS_DOCUMENT_APPID}"
+      }
     }
   }
 }

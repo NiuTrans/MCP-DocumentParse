@@ -2,10 +2,10 @@
 文档解析MCP工具
 支持PDF、Word、Excel、PPT等格式转换为Markdown
 """
+import hashlib
 import os
 import tempfile
 import time
-import zipfile
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Dict
@@ -44,23 +44,48 @@ class UploadFileWrapper:
 
 
 class DocumentTransClient:
-    """文档转换API客户端"""
+    """文档转换API客户端（使用小牛翻译API）"""
 
-    def __init__(self, base_url="http://your-api-domain.com"):
+    def __init__(self, base_url="http://niutrans.com", app_id="", apikey=""):
         self.base_url = base_url.rstrip('/')
         self.session = requests.Session()
+        self.app_id = app_id
+        self.apikey = apikey
 
-    def upload_file(self, file, **kwargs):
-        """上传文件并处理API响应"""
-        url = f"{self.base_url}/documentConvert/documentConvertByFile"
-        files = {'file': (kwargs.get('fileName'), file)}
-        data = {**kwargs}
+        # 初始化API路径
+        self.convert_url = f"{self.base_url}/v2/doc/convert/uploadConvert"
+        self.status_url = f"{self.base_url}/v2/doc/convert/status/{{file_no}}"
+        self.interrupt_url = f"{self.base_url}/v2/doc/convert/interrupt/{{file_no}}"
+        self.download_url = f"{self.base_url}/v2/doc/convert/download/{{file_no}}"
+
+    def generate_auth_str(self, params):
+        """生成权限字符串"""
+        sorted_params = sorted(list(params.items()) + [('apikey', self.apikey)], key=lambda x: x[0])
+        param_str = '&'.join([f'{key}={value}' for key, value in sorted_params])
+        md5 = hashlib.md5()
+        md5.update(param_str.encode('utf-8'))
+        auth_str = md5.hexdigest()
+        return auth_str
+
+    def upload_and_convert(self, file, to_file_suffix="markdown", processing_mode=0, from_lang=None):
+        """上传文件并转换"""
+        files = {'file': file}
+        data = {
+            'from': from_lang or 'zh',
+            'appId': self.app_id,
+            'timestamp': int(time.time()),
+            'toFileSuffix': to_file_suffix
+        }
+
+        # 生成鉴权字符串
+        auth_str = self.generate_auth_str(data)
+        data['authStr'] = auth_str
 
         try:
-            resp = self.session.post(url, files=files, data=data)
+            resp = self.session.post(self.convert_url, files=files, data=data)
             resp_json = resp.json()
 
-            print(f"api上传返回值: {resp_json}")
+            print(f"文档转换API上传返回值: {resp_json}")
 
             # 检查HTTP状态码
             if resp.status_code != 200:
@@ -68,16 +93,21 @@ class DocumentTransClient:
                 raise Exception(f"文件上传失败: {error_msg}")
 
             # 检查业务逻辑错误
-            code = resp_json.get('code', 200)
+            code = resp_json.get('code', 500)
             if code != 200:
-                error_msg = resp_json.get('msg', f"业务错误，错误码: {code}")
+                error_msg = resp_json.get('msg', '未知错误')
                 raise Exception(f"文件上传失败: {error_msg}")
 
             # 检查data是否存在
             if 'data' not in resp_json or resp_json['data'] is None:
                 raise Exception("文件上传失败: API返回数据为空")
 
-            return resp_json['data']
+            # 获取fileNo
+            file_no = resp_json['data'].get('fileNo')
+            if not file_no:
+                raise Exception("文件上传失败: 未返回有效的fileNo")
+
+            return file_no
 
         except Exception as e:
             # 如果是已捕获的异常，直接重新抛出
@@ -91,53 +121,136 @@ class DocumentTransClient:
                 error_msg += f"，API响应: {resp_json}"
             raise Exception(error_msg)
 
-    def get_status(self, file_uuid):
-        """查询文件处理状态并处理API响应"""
-        url = f"{self.base_url}/documentConvert/getDocumentInfo"
-        params = {'fileUuid': file_uuid}
+    def get_document_info(self, file_no):
+        """获取文档信息"""
+        params = {
+            "appId": self.app_id,
+            "timestamp": int(time.time())
+        }
+
+        # 生成鉴权字符串
+        auth_str = self.generate_auth_str(params)
+        params['authStr'] = auth_str
+
+        # 替换URL中的占位符
+        url = self.status_url.format(file_no=file_no)
 
         try:
             resp = self.session.get(url, params=params)
             resp_json = resp.json()
 
-            print(f"状态查询返回值: {resp_json}")
+            print(f"获取文档信息返回值: {resp_json}")
 
             # 检查HTTP状态码
             if resp.status_code != 200:
                 error_msg = resp_json.get('msg', f"API返回错误状态码: {resp.status_code}")
-                raise Exception(f"状态查询失败: {error_msg}")
+                raise Exception(f"获取文档信息失败: {error_msg}")
 
             # 检查业务逻辑错误
-            code = resp_json.get('code', 200)
+            code = resp_json.get('code', 500)
             if code != 200:
-                error_msg = resp_json.get('msg', f"业务错误，错误码: {code}")
-                raise Exception(f"状态查询失败: {error_msg}")
+                error_msg = resp_json.get('msg', '未知错误')
+                raise Exception(f"获取文档信息失败: {error_msg}")
 
             # 检查data是否存在
             if 'data' not in resp_json or resp_json['data'] is None:
-                raise Exception("状态查询失败: API返回数据为空")
+                raise Exception("获取文档信息失败: API返回数据为空")
 
             return resp_json['data']
 
         except Exception as e:
             # 如果是已捕获的异常，直接重新抛出
-            if isinstance(e, Exception) and "状态查询失败" in str(e):
+            if isinstance(e, Exception) and "获取文档信息失败" in str(e):
                 raise
 
             # 处理其他异常
-            error_msg = f"状态查询失败: {str(e)}"
+            error_msg = f"获取文档信息失败: {str(e)}"
             # 尝试从响应中获取更多错误信息
             if 'resp_json' in locals():
                 error_msg += f"，API响应: {resp_json}"
             raise Exception(error_msg)
 
-    def download_file(self, file_uuid, save_path, file_type=3):
-        url = f"{self.base_url}/documentConvert/downloadFile"
-        params = {'fileUuid': file_uuid, 'type': file_type}
+    def interrupt_convert(self, file_no):
+        """中断转换"""
+        data = {
+            "appId": self.app_id,
+            "timestamp": int(time.time())
+        }
+
+        # 生成鉴权字符串
+        auth_str = self.generate_auth_str(data)
+        data['authStr'] = auth_str
+
+        # 替换URL中的占位符
+        url = self.interrupt_url.format(file_no=file_no)
+
+        try:
+            resp = self.session.put(url, data=data)
+            resp_json = resp.json()
+
+            print(f"中断转换返回值: {resp_json}")
+
+            # 检查HTTP状态码
+            if resp.status_code != 200:
+                error_msg = resp_json.get('msg', f"API返回错误状态码: {resp.status_code}")
+                raise Exception(f"中断转换失败: {error_msg}")
+
+            # 检查业务逻辑错误
+            code = resp_json.get('code', 500)
+            if code != 200:
+                error_msg = resp_json.get('msg', '未知错误')
+                raise Exception(f"中断转换失败: {error_msg}")
+
+            return True
+
+        except Exception as e:
+            # 如果是已捕获的异常，直接重新抛出
+            if isinstance(e, Exception) and "中断转换失败" in str(e):
+                raise
+
+            # 处理其他异常
+            error_msg = f"中断转换失败: {str(e)}"
+            # 尝试从响应中获取更多错误信息
+            if 'resp_json' in locals():
+                error_msg += f"，API响应: {resp_json}"
+            raise Exception(error_msg)
+
+    def download_file(self, file_no, save_path):
+        """下载文件"""
+        params = {
+            "type": 1,
+            "appId": self.app_id,
+            "timestamp": int(time.time())
+        }
+
+        # 生成鉴权字符串
+        auth_str = self.generate_auth_str(params)
+        params['authStr'] = auth_str
+
+        # 替换URL中的占位符
+        url = self.download_url.format(file_no=file_no)
+
         try:
             with self.session.get(url, params=params, stream=True) as resp:
-                resp.raise_for_status()
                 total_size = int(resp.headers.get('content-length', 0))
+
+                # 获取文件名（如果响应头中有）
+                file_name = None
+                content_disposition = resp.headers.get('Content-Disposition')
+                if content_disposition:
+                    try:
+                        file_name = content_disposition.split('=')[1]
+                        # 移除可能的引号
+                        if file_name.startswith('"') and file_name.endswith('"'):
+                            file_name = file_name[1:-1]
+                    except:
+                        pass
+
+                # 如果没有从响应头获取到文件名，使用默认名称
+                if not file_name:
+                    file_name = f"parsed_{file_no}.md"
+                    save_path = os.path.join(os.path.dirname(save_path), file_name)
+
                 with open(save_path, 'wb') as f, tqdm(
                         desc="下载解析结果",
                         total=total_size,
@@ -152,63 +265,74 @@ class DocumentTransClient:
         except Exception as e:
             raise Exception(f"文件下载失败: {str(e)}")
 
-    def wait_for_completion(self, file_uuid, interval=2, timeout=3600) -> dict:
+    def wait_for_completion(self, file_no, interval=1, timeout=3600) -> dict:
+        """等待转换完成"""
         start_time = time.time()
         last_progress = 0
         with tqdm(desc="文档解析进度", unit="%") as pbar:
             while True:
-                status_data = self.get_status(file_uuid)
-                current_status = status_data['fileStatus']
-                current_progress = int(status_data['progress'] * 100)
+                status_data = self.get_document_info(file_no)
+
+                # 获取状态和进度信息
+                convertStatus = status_data.get('convertStatus', 200)
+                # 根据状态码估算进度
+                progress_map = {
+                    200: 0,  # 等待中
+                    201: 50,  # 处理中
+                    202: 100
+                }
+                current_progress = progress_map.get(convertStatus, last_progress)
+
                 if current_progress > last_progress:
                     pbar.update(current_progress - last_progress)
                     last_progress = current_progress
-                if current_status == 202:
+
+                # 判断是否完成
+                # 状态码202表示转换完成
+                if convertStatus == 202:
                     pbar.update(100 - last_progress)
                     return status_data
-                elif current_status >= 204:
-                    error_msg = status_data.get('transFailureCause', '未知错误')
+                elif convertStatus == 204:  # 处理失败
+                    error_msg = status_data.get('errorMsg', '处理失败')
                     raise Exception(f"解析失败: {error_msg}")
+                elif convertStatus == 106:  # 已取消
+                    raise Exception("解析任务已取消")
                 elif time.time() - start_time > timeout:
                     raise TimeoutError(f"解析超时（{timeout}秒）")
+
                 time.sleep(interval)
 
-
-def extract_text_from_zip(zip_path: str) -> str:
-    """从ZIP文件中提取Markdown文本内容"""
-    text_content = ""
-    with zipfile.ZipFile(zip_path, 'r') as zip_ref:
-        for file_info in zip_ref.infolist():
-            # 优先提取Markdown文件（原解析逻辑生成的主要文本格式）
-            if file_info.filename.lower().endswith('.md'):
-                with zip_ref.open(file_info) as f:
-                    text_content += f.read().decode('utf-8', errors='ignore') + "\n\n"
-        # 若没有Markdown，尝试提取TXT
-        if not text_content:
-            for file_info in zip_ref.infolist():
-                if file_info.filename.lower().endswith('.txt'):
-                    with zip_ref.open(file_info) as f:
-                        text_content += f.read().decode('utf-8', errors='ignore') + "\n\n"
-    if not text_content:
-        raise Exception("ZIP文件中未找到可解析的文本内容（无MD/TXT文件）")
-    return text_content.strip()
 
 
 def call_document_convert_api(file) -> str:
     """调用文档转换API获取解析后的文本（主要是Markdown）"""
-    client = DocumentTransClient(base_url="http://82.156.10.7:10064/")
+    api_key = os.getenv("NIUTRANS_API_KEY")
+    app_id = os.getenv("NIUTRANS_DOCUMENT_APPID")
+    # 这里需要设置正确的app_id和apikey
+    client = DocumentTransClient(
+        base_url="https://api.niutrans.com",
+        app_id=app_id,  # 应用唯一标识，在'控制台->个人中心'中查看
+        apikey=api_key  # 在'控制台->个人中心'中查看
+    )
     try:
-        file_uuid = client.upload_file(
+        # 上传并转换文件
+        file_no = client.upload_and_convert(
             file=file.file,
-            toFileSuffix="markdown",  # 明确要求返回Markdown格式
-            fileName=file.filename
+            from_lang="auto"  # 设置源语言
         )
-        print(f"文档解析任务提交成功，任务ID: {file_uuid}")
-        status_data = client.wait_for_completion(file_uuid)
+        print(f"文档解析任务提交成功，file_no: {file_no}")
+        
+        # 等待转换完成
+        status_data = client.wait_for_completion(file_no)
+        
+        # 下载转换后的MD文件并直接读取内容
         with tempfile.TemporaryDirectory() as temp_dir:
-            zip_save_path = os.path.join(temp_dir, f"parsed_{file_uuid}.zip")
-            client.download_file(file_uuid, zip_save_path)
-            text_content = extract_text_from_zip(zip_save_path)
+            downloaded_file_path = os.path.join(temp_dir, f"parsed_{file_no}.md")
+            client.download_file(file_no, downloaded_file_path)
+            # 直接读取MD文件内容
+            with open(downloaded_file_path, 'r', encoding='utf-8') as f:
+                text_content = f.read()
+        
         return text_content
     except Exception as e:
         raise Exception(
@@ -303,6 +427,7 @@ def process_document_content(text_content: str) -> Dict:
         "This is the optimal tool for reading such office files and should be prioritized for use."
         "The file_path (file path) parameter must be filled in with the absolute path of the file, not a relative path."
         "After successful processing, it will return the file ID and the number of chunks. Call get_document_chunk() based on the file ID and the number of chunks."
+        "Use NiuTrans Document Api"
     ))
 def parse_document_by_path(
         file_path: Annotated[
@@ -313,9 +438,9 @@ def parse_document_by_path(
         ]
 ) -> Dict[str, str]:
     """
-    将文件转换为Markdown格式。
+    使用小牛文档翻译api将文件转换为Markdown格式。
 
-    处理完成后，会返回成功的文件id和分段数，根据文件id和分段数调用get_document_chunk()。
+    处理完成后，会返回成功的文件id和分段数，根据文件id和分段数调用get_document_chunk()获取文本内容。
 
     Args:
         file_path: 文件地址,绝对路径
@@ -345,8 +470,12 @@ def parse_document_by_path(
             # 创建模拟的UploadFile对象
             fake_file = UploadFileWrapper(file_path)
             filename = fake_file.filename
+            
             text_content = call_document_convert_api(fake_file)
+            
+            # 处理文本内容
             process_result = process_document_content(text_content)
+            
             # 生成文档ID
             doc_id = generate_document_id()
             print(f"解析结果id: {doc_id}")
@@ -374,7 +503,7 @@ def parse_document_by_path(
 def get_document_chunk(
         document_id: Annotated[
             str,
-            Field(description="由parse_document返回的文档ID")
+            Field(description="由parse_document_by_path返回的文档ID")
         ],
         chunk_index: Annotated[
             int,
@@ -384,16 +513,17 @@ def get_document_chunk(
     """
     根据文档ID和索引，返回指定的分段内容（单次返回一段，避免内容过长）
 
-    根据文档ID和分段索引获取具体的文档段落内容。需要先调用parse_document()获取document_id。
+    根据文档ID和分段索引获取具体的文档段落内容。需要先调用parse_document_by_path()获取document_id。
 
     返回:
         成功: {
             "document_id": "文档ID",
             "current_chunk": 当前段号（从1开始）(str),
             "total_chunks": 文档总分段数(str),
-            "content": "当前段的Markdown格式内容"
+            "content": "当前段的Markdown格式内容",
+            "status": "success"
         }
-        失败: 抛出异常，包含错误信息
+        失败: {"status": "error", "error": "错误信息"}
     """
     try:
         # 检查文档是否存在
@@ -408,6 +538,7 @@ def get_document_chunk(
             raise IndexError(f"段落索引超出范围（总段数：{total}，请传入0~{total - 1}）")
 
         # 确保返回的current_chunk和total_chunks是字符串类型
+        # 这是为了与之前的API保持兼容性
         return {
             "document_id": document_id,
             "current_chunk": str(chunk_index + 1),  # 显示第x段（人类可读）
