@@ -6,7 +6,7 @@
 
 ## 支持的文件格式
 
-- PDF (.pdf)
+- PDF (.pdf) - 支持可编辑 PDF 和扫描件
 - Word (.doc, .docx)
 - Excel (.xls, .xlsx)
 - PowerPoint (.ppt, .pptx)
@@ -23,6 +23,17 @@ uv tool install mcp-document-parse
 
 - `NIUTRANS_API_KEY`（必填）：小牛翻译开放平台提供文档API的 API Key,可免费使用, 请登录后获取:https://niutrans.com/cloud/api/list
 - `NIUTRANS_DOCUMENT_APPID`（必填）：小牛翻译开放平台提供文档API的 APPID,可免费使用, 请登录后获取:https://niutrans.com/cloud/api/list
+
+## 计费说明
+
+本工具使用小牛翻译开放平台的文档解析 API，计费规则如下：
+
+| 文件类型 | 计费标准 |
+|---------|---------|
+| PDF / Word / PPT | 1 页 = 2 积分 |
+| Excel | 2000 字符 = 2 积分 |
+
+> 💡 **免费额度**：平台每天赠送 **100 积分**，供大家免费使用！
 
 ## 环境要求
 
