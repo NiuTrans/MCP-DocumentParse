@@ -46,7 +46,7 @@ class DocumentTransClient:
         self.apikey = apikey
 
         # 初始化API路径
-        self.convert_url = f"{self.base_url}/v2/doc/convert/uploadConvert"
+        self.convert_url = f"{self.base_url}/v2/doc/convert/upload"
         self.status_url = f"{self.base_url}/v2/doc/convert/status/{{file_no}}"
         self.interrupt_url = f"{self.base_url}/v2/doc/convert/interrupt/{{file_no}}"
         self.download_url = f"{self.base_url}/v2/doc/convert/download/{{file_no}}"
